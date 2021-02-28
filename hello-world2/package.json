@@ -14,12 +14,11 @@
   },
   "scripts": {
     "build": "npm run clean && mkdir ./dist && webpack --mode=production && cp ./package.json ./dist/package.json",
-    "build:dev": "npm run clean && npm run mock:build && mkdir ./dist && USE_MOCK=1 webpack --mode=development && cp ./package.json ./dist/package.json",
+    "build:dev": "npm run clean && mkdir ./dist && webpack --mode=development && cp ./package.json ./dist/package.json",
     "start:local": "npm run build:dev && sam local start-api",
     "start:debug": "npm run build:dev && sam local start-api --debug-port 5858",
     "test": "jest",
-    "clean": "rm -rf dist/",
-    "mock:build": "axios-mock-server -c .mockserverrc"
+    "clean": "rm -rf dist/"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.72",

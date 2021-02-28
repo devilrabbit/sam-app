@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Item</title>
+  </head>
+  <script>
+    window.onload = function() {
+      var params = {};
+      if (location.search) {
+        var entries = location.search.substring(1).split('&');
+        for (var i = 0; i < entries.length; i++) {
+          var entry = entries[i].split('=');
+          params[entry[0]] = entry[1] || '';
+        }
+      }
+      document.getElementById("state").value = params['state'];
+
+      document.getElementById("submit").addEventListener('click', function() {
+        document.getElementById("sessionId").value =
+          `${document.getElementById("groupId").value}.${document.getElementById("itemId").value}`;
+        document.form.submit();
+      });
+    };
+  </script>
+  <style type="text/css">
+  body {
+    background-color: #232323;
+    font-family: sans-serif;
+  }
+  .main {
+    background-color: #464646;
+    width: 400px;
+    height: 400px;
+    margin: 7em auto;
+    border-radius: 1.5em;
+    box-shadow: 0px 11px 35px 2px rgba(0, 0, 0, 0.14);
+  }
+  .title {
+    padding-top: 40px;
+    color: #ffffff;
+    font-weight: bold;
+    font-size: 23px;
+    text-align: center;
+    margin-bottom: 2em;
+  }
+  .textbox {
+    width: 75%;
+    color: #232323;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 1px;
+    background: #969696;
+    padding: 10px 20px;
+    border: 1px solid transparent;
+    border-radius: 20px;
+    outline: none;
+    box-sizing: border-box;
+    margin-bottom: 50px;
+    margin-left: 46px;
+    text-align: center;
+    margin-bottom: 27px;
+  }
+  .textbox:focus {
+    border: 1px solid #969696;
+    background: #aaaaaa;
+  }
+  .submit {
+    cursor: pointer;
+    width: 50%;
+    border-radius: 5em;
+    color: #eeeeee;
+    background: #232323;
+    border: 0;
+    padding-left: 40px;
+    padding-right: 40px;
+    padding-bottom: 10px;
+    padding-top: 10px;
+    font-size: 13px;
+    margin: 50px 25%;
+  }
+  .submit:focus {
+    outline: none;
+  }
+  .submit:active {
+    color: #232323;
+    background: #eeeeee;
+  }
+  </style>
+<body>
+  <div class="main">
+    <p class="title">Title</p>
+    <form id="form" class="form" action="http://localhost:3000/hello2" method="get">
+      <div>
+        <input id="groupId" class="textbox" type="text" name="groupId" placeholder="Group">
+      </div>
+      <div>
+        <input id="itemId" class="textbox" type="text" name="itemId" placeholder="ID">
+      </div>
+      <input id="sessionId" type="hidden" name="sessionId">
+      <input id="state" type="hidden" name="state">
+      <div>
+        <button id="submit" class="submit">GO</button>
+      </div>
+    </form>
+  </div>
+</body>
+</html>

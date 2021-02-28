@@ -1,0 +1,17 @@
+{
+  "fake-item": [{
+    "PutRequest": {
+      "Item": {
+        "itemId": {
+          "S": "a"
+        },
+        "groupId": {
+          "S": "b"
+        },
+        "attribute": {
+          "S": "c"
+        }
+      }
+    }
+  }]
+}
