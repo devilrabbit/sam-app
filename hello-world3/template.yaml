@@ -1,0 +1,24 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: sam-app
+
+Globals:
+  Function:
+    Timeout: 30
+
+Resources:
+  RotationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./app
+      Handler: app.lambda_handler
+      Runtime: python3.8
+      Policies:
+        - arn:aws:iam::aws:policy/AWSSecretsManagerRotationPolicy
+        - arn:aws:iam::aws:policy/AWSSecretsManagerGetSecretValuePolicy
+
+Outputs:
+  RotationFunctionName:
+    Value: !Ref RotationFunction
+  RotationFunctionArn:
+    Value: !GetAtt RotationFunction.Arn

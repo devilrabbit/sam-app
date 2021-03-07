@@ -129,5 +129,8 @@ $RECYCLE.BIN/
 .aws-sam/
 dist/
 
+# Python
+.venv/
+__pycache__
 
 # End of https://www.gitignore.io/api/osx,node,linux,windows
