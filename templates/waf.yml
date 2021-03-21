@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: WAF
+
+Parameters:
+  IPAddresses:
+    Type: String
+  AdminIPAddresses:
+    Type: String
+  AdminPathPattern:
+    Type: String
+
+Resources:
+  WAFv2WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      DefaultAction:
+        Block: {}
+      Name: WAFv2WebACL
+      Rules:
+        - Name: AllowRule
+          Action:
+            Allow: {}
+          Priority: 100
+          Statement:
+            AndStatement:
+              Statements:
+                - NotStatement:
+                    Statement:
+                      RegexPatternSetReferenceStatement:
+                        Arn: !GetAtt AdminPathPatternSet.Arn
+                        FieldToMatch:
+                          UriPath: {}
+                        TextTransformations:
+                          - Type: "URL_DECODE"
+                            Priority: 0
+                - IPSetReferenceStatement:
+                    Arn: !GetAtt AllowIPSet.Arn
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: AllowMetric
+            SampledRequestsEnabled: false
+        - Name: AdminAllowRule
+          Action:
+            Allow: {}
+          Priority: 101
+          Statement:
+            AndStatement:
+              Statements:
+                - RegexPatternSetReferenceStatement:
+                    Arn: !GetAtt AdminPathPatternSet.Arn
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Type: "URL_DECODE"
+                        Priority: 0
+                - IPSetReferenceStatement:
+                    Arn: !GetAtt AdminAllowIPSet.Arn
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: AdminAllowMetric
+            SampledRequestsEnabled: false
+      Scope: CLOUDFRONT
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: WAFWebACLMetrics
+        SampledRequestsEnabled: false
+
+  AllowIPSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Addresses:
+        - !Ref IPAddresses
+      IPAddressVersion: IPV4
+      Scope: CLOUDFRONT
+
+  AdminAllowIPSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Addresses:
+        - !Ref AdminIPAddresses
+      IPAddressVersion: IPV4
+      Scope: CLOUDFRONT
+
+  AdminPathPatternSet:
+    Type: AWS::WAFv2::RegexPatternSet
+    Properties:
+      RegularExpressionList:
+        - !Sub "^${AdminPathPattern}*"
+      Scope: CLOUDFRONT
