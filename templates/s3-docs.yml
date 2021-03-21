@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Copy docs
+
+Parameters:
+  BucketName:
+    Type: String
+  Key:
+    Type: String
+
+Resources:
+  S3CopyResource:
+    Type: Custom::S3CopyResource
+    Properties:
+      ServiceToken: !GetAtt AWSLambdaFunction.Arn
+      Body:
+        Fn::Transform:
+          Name: AWS::Include
+          Parameters:
+            Location: ../docs/index.html
+      BucketName: !!Ref BucketName
+      Key: !Ref Key
+
+  CopyResourceFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: "Copy resource lambda in cfn"
+      FunctionName: !Sub '${AWS::StackName}-${AWS::Region}-copy-resource-lambda'
+      Handler: index.handler
+      Role: !GetAtt AWSLambdaExecutionRole.Arn
+      Timeout: 360
+      Runtime: python3.6
+      Code:
+        ZipFile: |
+        import boto3
+        import cfnresponse
+        def handler(event, context):
+            request_type = event['RequestType']
+            properties = event['ResourceProperties']
+            body = properties['Body']
+            bucket_name = properties['BucketName']
+            key = properties['Key']
+            s3 = boto3.client('s3')
+            response_data = {}
+            try:
+                if request_type in ('Create', 'Update'):
+                    s3.put_object(Bucket=bucket_name, Key=key, Body=body.encode('utf-8'))
+                elif request_type == 'Delete':
+                    s3.delete_object(Bucket=bucket_name, Key=key)
+                print("Execution succeeded.")
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+            except Exception as e:
+                print("Execution failed...")
+                print(str(e))
+                response_data['Data'] = str(e)
+                cfnresponse.send(event, context, cfnresponse.FAILED, response_data)
+
+  AWSLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+        Version: '2012-10-17'
+      Path: "/"
+      Policies:
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Effect: Allow
+            Resource: arn:aws:logs:*:*:*
+          Version: '2012-10-17'
+        PolicyName: !Sub ${AWS::StackName}-${AWS::Region}-logs-policy
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - s3:PutObject
+            - s3:DeleteObject
+            - s3:List*
+            Effect: Allow
+            Resource:
+              - !Sub arn:aws:s3:::${FromBucketName}/*
+              - !Sub arn:aws:s3:::${SampleS3Bucket}
+          Version: '2012-10-17'
+        PolicyName: !Sub ${AWS::StackName}-${AWS::Region}-s3-policy
+      RoleName: !Sub ${AWS::StackName}-${AWS::Region}-copy-resource-lambda-role

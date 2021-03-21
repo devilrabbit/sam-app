@@ -4,7 +4,7 @@ Description: >
   sam-app
 
   Sample SAM Template for sam-app
-  
+
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
@@ -41,6 +41,14 @@ Resources:
           Properties:
             Path: /hello2
             Method: get
+
+  CustomResource:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ../templates/s3-doc.yaml
+      Parameters:
+        BucketName: test-doc-bucket
+        Key: !Sub /docs/${AWS::StackName}/api.html
 
 Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
