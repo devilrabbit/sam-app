@@ -17,6 +17,72 @@ Resources:
         Block: {}
       Name: WAFv2WebACL
       Rules:
+        - Name: AWS-AWSManagedRulesAmazonIpReputationList
+          Priority: 1
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesAmazonIpReputationList
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesAmazonIpReputationList
+            SampledRequestsEnabled: false
+        - Name: AWS-AWSManagedRulesCommonRuleSet
+          Priority: 2
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              ExcludedRules:
+                - Name: SizeRestrictions_BODY
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesCommonRuleSet
+            SampledRequestsEnabled: false
+        - Name: AWS-AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 3
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesKnownBadInputsRuleSet
+            SampledRequestsEnabled: false
+        - Name: SizeRestrictionsBODY-rule
+          Action:
+            Block: {}
+          Priority: 100
+          Statement:
+            AndStatement:
+              Statements:
+                - SizeConstraintStatement:
+                    FieldToMatch:
+                      Body: {}
+                    ComparisonOperator: GT
+                    Size: 10240
+                    TextTransformations:
+                      - Type: NONE
+                        Priority: 0
+                - NotStatement:
+                    Statement:
+                      RegexPatternSetReferenceStatement:
+                        Arn: !GetAtt AdminPathPatternSet.Arn
+                        FieldToMatch:
+                          UriPath: {}
+                        TextTransformations:
+                          - Type: URL_DECODE
+                            Priority: 0
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            MetricName: AllowMetric
+            SampledRequestsEnabled: false
         - Name: AllowRule
           Action:
             Allow: {}
