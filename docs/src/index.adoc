@@ -6,7 +6,6 @@
 :sectnums:
 :sectnumlevels: 4
 :sectlinks:
-:imagesdir: ./_images
 :icons: font
 :source-highlighter: coderay
 :example-caption: 例
@@ -24,3 +23,5 @@
 include::chapter1/index.adoc[]
 
 include::chapter2/index.adoc[]
+
+include::test.adoc[]

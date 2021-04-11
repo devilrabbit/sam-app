@@ -4,14 +4,22 @@
   "main": "index.js",
   "devDependencies": {
     "@asciidoctor/core": "^2.2.1",
-    "asciidoctor-pdf": "^1.0.0-alpha.12"
+    "asciidoctor-pdf": "*",
+    "textlint": "^11.9.0",
+    "textlint-filter-rule-allowlist": "^2.0.1",
+    "textlint-rule-prh": "^5.3.0"
   },
   "scripts": {
     "build": "asciidoctor ./src/index.adoc --destination-dir ./dist/ && cp -rf ./src/images/ ./dist/images/",
     "build:pdf": "asciidoctor-web-pdf ./src/index.adoc --destination-dir ./dist/",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "textlint ./src/test.adoc"
   },
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "",
+  "dependencies": {
+    "textlint-plugin-asciidoctor": "file:tools/textlint-plugin-asciidoctor",
+    "textlint-rule-preset-ja-technical-writing": "^4.0.1"
+  }
 }

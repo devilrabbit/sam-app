@@ -1,0 +1,22 @@
+{
+    "filters": {
+        "allowlist": {
+            "allow": [
+                "いいえ",
+                "一十百千万億兆",
+                "あ、い、う、え"
+            ]
+        }
+    },
+    "rules": {
+        "preset-ja-technical-writing": true,
+        "prh": {
+        "rulePaths": [
+            "tools/WEB+DB_PRESS.yml"
+        ]
+        }
+    },
+    "plugins": [
+        "asciidoctor"
+    ]
+}
