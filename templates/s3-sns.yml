@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Copy docs
+
+Parameters:
+  BucketName:
+    Type: String
+  Email:
+    Type: String
+
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${AWS::StackName}-${AWS::Region}-s3-topic
+      Subscription:
+        - Endpoint: !Ref Email
+          Protocol: email
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    DependsOn: LambdaPermission
+    Properties:
+      BucketName: !Ref BucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:Put
+            Function: !GetAtt Function.Arn
+
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-${AWS::Region}-s3-function-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref Function
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${BucketName}
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-${AWS::Region}-s3-function
+      Runtime: python3.8
+      MemorySize: 128
+      Timeout: 30
+      Role: !GetAtt FunctionRole.Arn
+      Handler: index.lambda_handler
+      Environment:
+        Variables:
+          SnsTopicArn: !GetAttr Topic.Arn
+      Code:
+        ZipFile: |
+          import os
+          import boto3
+          import json
+
+          def lambda_handler(event, context):
+            s3 = boto3.client('s3')
+            sns = boto3.client('sns')
+
+            bucket = event['Records'][0]['s3']['bucket']['name']
+            key = event['Records'][0]['s3']['object']['key']
+
+            print(bucket)
+            print(key)
+
+            response = s3.get_object(Bucket=bucket, Key=key)
+            body = response[u'Body'].read().decode('utf-8')
+
+            sns.publish(
+              TopicArn=os.environ.get('SnsTopicArn'),
+              Subject='test',
+              Message=body,
+            )
