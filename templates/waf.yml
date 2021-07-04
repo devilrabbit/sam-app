@@ -8,6 +8,8 @@ Parameters:
     Type: String
   AdminPathPattern:
     Type: String
+  DeliveryStreamArn:
+    Type: String
 
 Resources:
   WAFv2WebACL:
@@ -153,3 +155,85 @@ Resources:
       RegularExpressionList:
         - !Sub "^${AdminPathPattern}*"
       Scope: CLOUDFRONT
+
+  ConfigureWAFLogs:
+    Type: 'Custom::ConfigureWAFLogs'
+    Properties:
+      ServiceToken: !GetAtt CustomResource.Arn
+      WAFWebACLArn: !GetAtt WAFv2WebACL.Arn
+      DeliveryStreamArn: !Ref DeliveryStreamArn
+
+  CustomResourceLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: LambdaBasicExecRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: WAFAccess
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'wafv2:GetWebACL'
+                  - 'wafv2:UpdateWebACL'
+                  - 'wafv2:PutLoggingConfiguration'
+                  - 'wafv2:DeleteLoggingConfiguration'
+                Resource:
+                  - !GetAtt WAFv2WebACL.Arn
+              - Effect: Allow
+                Action: 'iam:CreateServiceLinkedRole'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:iam::*:role/aws-service-role/wafv2.amazonaws.com/AWSServiceRoleForWAFV2Logging'
+                Condition:
+                  StringLike:
+                    iam:AWSServiceName: 'wafv2.amazonaws.com'
+  CustomResource:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Description: This lambda function configures logging enabled in the CloudFormation template.
+      Handler: index.handler
+      Role: !GetAtt CustomResourceLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          request_type = event['RequestType'].upper() if ('RequestType' in event) else ""
+          def handler(event, context):
+            try:
+              client = boto3.client('wafv2')
+              if 'CREATE' in request_type:
+                response = client.put_logging_configuration(
+                  LoggingConfiguration={
+                    'ResourceArn': event['ResourceProperties']['WAFWebACLArn'],
+                    'LogDestinationConfigs': [event['ResourceProperties']['DeliveryStreamArn']]
+                  }
+                )
+              elif 'UPDATE' in request_type:
+                response = client.delete_logging_configuration(
+                    ResourceArn=event['OldResourceProperties']['WAFWebACLArn']
+                )
+                response = client.put_logging_configuration(
+                  LoggingConfiguration={
+                    'ResourceArn': event['ResourceProperties']['WAFWebACLArn'],
+                    'LogDestinationConfigs': [event['ResourceProperties']['DeliveryStreamArn']]
+                  }
+                )
+              elif 'DELETE' in request_type:
+                response = client.delete_logging_configuration(
+                    ResourceArn=event['ResourceProperties']['WAFWebACLArn']
+                )
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, response)
+            except Exception as e:
+              cfnresponse.send(event, context, cfnresponse.FAILED, {})
+      Runtime: python3.8
+      MemorySize: 128
+      Timeout: 300
