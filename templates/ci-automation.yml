@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: SSM
+
+Parameters:
+  Prefix:
+    Type: String
+
+Resources:
+  CodeCommitPRChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - "CodeCommit Pull Request State Change"
+        resources:
+          - !Sub arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${Prefix}-a
+          - !Sub arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${Prefix}-b
+        detail:
+          event:
+            - pullRequestSourceBranchUpdated
+            - pullRequestCreated
+      State: ENABLED
+      Targets:
+        - Id: !Sub ${AWS::StackName}-pr-changed-target
+          Arn: !Ref PRReviewDocument
+          RoleArn: !GetAtt PRDocumentExecutionRole.Arn
+          InputTransformer:
+            InputTemplate: '{"PullRequestId":<pullRequestId>,"RepositoryName":<repositoryName>,"SourceCommit":<sourceCommit>,"DestinationCommit":<destinationCommit>}'
+            InputPathsMap:
+              pullRequestId: '$.detail.pullRequestId'
+              repositoryNames: '$.detail.repositoryNames[0]'
+              sourceCommit: '$.detail.sourceCommit'
+              destinationCommit: '$.detail.destinationCommit'
+
+  CodeBuildChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.codebuild
+        detail-type:
+          - "CodeBuild Build State Change"
+        detail:
+          build-status:
+            - FAILED
+            - SUCCEEDED
+          project-name:
+            - !Sub ${Prefix}-a-TEST
+            - !Sub ${Prefix}-b-TEST
+      State: ENABLED
+      Targets:
+        - Id: !Sub ${AWS::StackName}-pr-comment-target
+          Arn: !Ref PRCommentReviewDocument
+          RoleArn: !GetAtt PRDocumentExecutionRole.Arn
+          InputTransformer:
+            InputTemplate: '{"AdditionalInformation":<additionalInformation>,"Region":<region>}'
+            InputPathsMap:
+              additionalInformation: '$.detail.additional-information'
+              region: '$.region'
+        - Id: !Sub ${AWS::StackName}-build-to-sns-target
+          Arn: !Ref BuildEventTopic
+          InputTransformer:
+            InputTemplate: '"The project <project> has <state> at <at>."'
+            InputPathsMap:
+              project: '$.detail.project-name'
+              state: '$.detail.build-status'
+              at: '$.time'
+
+  PRReviewDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Content:
+        description: Review PullRequest Automation
+        schemaVersion: '0.3'
+        assumeRole: "{{ AutomationAssumeRole }}"
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            description: "(Optional) The ARN of the role that allows Automation to perform the actions on your behalf."
+          RepositoryName:
+            type: String
+            description: "(Required) Name of target repository."
+          PullRequestId:
+            type: String
+            description: "(Required) PullRequest Id for testing."
+          SourceCommit:
+            type: String
+            description: "(Required) Commit Id for source"
+          DestinationCommit:
+            type: String
+            description: "(Required) Commit Id for destination."
+        mainSteps:
+        - name: Execution
+          action: aws:executeScript
+          inputs:
+            Runtime: python3.7
+            Handler: script_handler
+            Script: |-
+              import datetime
+              import boto3
+              def script_handler(event, context):
+                  repository_name = event['repositoryName']
+                  pull_request_id = event['pullRequestId']
+                  source_commit = event['sourceCommit']
+                  destination_commit = event['destinationCommit']
+
+                  client_codecommit = boto3.client('codecommit')
+                  client_codecommit.post_comment_for_pull_request(
+                    pullRequestId = pull_request_id,
+                    repositoryName = repository_name,
+                    beforeCommitId = source_commit,
+                    afterCommitId = destination_commit,
+                    content = '**Build started at {}**'.format(datetime.datetime.utcnow().time())
+                  )
+
+                  test_project_name = '%s-TEST' % repository_name
+                  source_version = 'refs/pull/%s/head^{%s}' % (pull_request_id, source_commit)
+
+                  client_codebuild = boto3.client('codebuild')
+                  client_codebuild.start_build(
+                    projectName=test_project_name,
+                    sourceVersion=source_version
+                  )
+            InputPayload:
+                pullRequestId: '{{PullRequestId}}'
+                repositoryName: '{{RepositoryName}}'
+                sourceCommit: '{{SourceCommit}}'
+                destinationCommit: '{{DestinationCommit}}'
+
+  PRCommentReviewDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Content:
+        description: Add Comment of CodeBuild Result to PullRequest
+        schemaVersion: '0.3'
+        assumeRole: "{{ AutomationAssumeRole }}"
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            description: "(Optional) The ARN of the role that allows Automation to perform the actions on your behalf."
+          AdditionalInformation:
+            type: String
+            description: "(Required) Build information from EventBridge."
+          Region:
+            type: String
+            description: "(Required) Region of event."
+        mainSteps:
+        - name: Execution
+          action: aws:executeScript
+          inputs:
+            Runtime: python3.7
+            Handler: script_handler
+            Script: |-
+              import boto3
+              def script_handler(event, context):
+                  info = json.loads(event.['info'])
+
+                  pull_request_id = None
+                  repository_name = None
+                  before_commit_id = None
+                  after_commit_id = None
+                  for item info['environment']['environment-variables']:
+                      if item['name'] == 'pullRequestId': pull_request_id = item['value']
+                      if item['name'] == 'repositoryName': repository_name = item['value']
+                      if item['name'] == 'sourceCommit': before_commit_id = item['value']
+                      if item['name'] == 'destinationCommit': after_commit_id = item['value']
+
+                  if not pull_request_id or not repository_name or not before_commit_id or not after_commit_id:
+                      return
+
+                  phases = info.get('phases', [])
+                  region = event.get('region', 'us-east-1')
+                  s3_prefix = 's3-{0}'.format(region) if region != 'us-east-1' else 's3'
+
+                  content = ''
+                  for phase in phases:
+                      if phase.get('phase-status') == 'FAILED':
+                          badge = 'https://{0}.amazonaws.com/codefactory-{1}-prod-default-build-badges/failing.svg'.format(s3_prefix, region)
+                          content = '![Failing]({0} "Failing") - See the [Logs]({1})'.format(badge, info['logs']['deep-link'])
+                          break
+                      else:
+                          badge = 'https://{0}.amazonaws.com/codefactory-{1}-prod-default-build-badges/passing.svg'.format(s3_prefix, region)
+                          content = '![Passing]({0} "Passing") - See the [Logs]({1})'.format(badge, info['logs']['deep-link'])
+
+                  client_codecommit = boto3.client('codecommit')
+                  client_codecommit.post_comment_for_pull_request(
+                    pullRequestId = pull_request_id,
+                    repositoryName = repository_name,
+                    beforeCommitId = before_commit_id,
+                    afterCommitId = after_commit_id,
+                    content = content
+                  )
+            InputPayload:
+              info: '{{AdditionalInformation}}'
+              region: '{{Region}}'
+
+  BuildEventTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${Prefix}-topic
+
+  BuildEventTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref BuildEventTopic
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref BuildEventTopic
+
+  PRDocumentExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-document-execution-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-pr-policy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codecommit:PostCommentForPullRequest
+                Resource:
+                  - !Sub arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${Prefix}-*
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                Resource:
+                  - !Sub arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:${Prefix}-*
