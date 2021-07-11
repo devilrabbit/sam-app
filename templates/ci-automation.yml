@@ -23,16 +23,44 @@ Resources:
             - pullRequestCreated
       State: ENABLED
       Targets:
-        - Id: !Sub ${AWS::StackName}-pr-changed-target
-          Arn: !Ref PRReviewDocument
+        - Id: !Sub ${AWS::StackName}-review-pr-action
+          Arn: !Ref ReviewPRDocument
           RoleArn: !GetAtt PRDocumentExecutionRole.Arn
           InputTransformer:
             InputTemplate: '{"PullRequestId":<pullRequestId>,"RepositoryName":<repositoryName>,"SourceCommit":<sourceCommit>,"DestinationCommit":<destinationCommit>}'
             InputPathsMap:
               pullRequestId: '$.detail.pullRequestId'
-              repositoryNames: '$.detail.repositoryNames[0]'
+              repositoryName: '$.detail.repositoryNames[0]'
               sourceCommit: '$.detail.sourceCommit'
               destinationCommit: '$.detail.destinationCommit'
+
+  CodeCommitTagChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - "CodeCommit Tag Change"
+        resources:
+          - !Sub arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${Prefix}-a
+          - !Sub arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${Prefix}-b
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - tag
+      State: ENABLED
+      Targets:
+        - Id: !Sub ${AWS::StackName}-execute-pipeline-action
+          Arn: !Ref ExecutePipelineDocument
+          RoleArn: !GetAtt PRDocumentExecutionRole.Arn
+          InputTransformer:
+            InputTemplate: '{"RepositoryName":<repositoryName>,"ReleaseVersion":<referenceName>}'
+            InputPathsMap:
+              repositoryName: '$.detail.repositoryName'
+              referenceName: '$.detail.referenceName'
 
   CodeBuildChangeRule:
     Type: AWS::Events::Rule
@@ -51,15 +79,15 @@ Resources:
             - !Sub ${Prefix}-b-TEST
       State: ENABLED
       Targets:
-        - Id: !Sub ${AWS::StackName}-pr-comment-target
-          Arn: !Ref PRCommentReviewDocument
+        - Id: !Sub ${AWS::StackName}-comment-pr-action
+          Arn: !Ref CommentPRDocument
           RoleArn: !GetAtt PRDocumentExecutionRole.Arn
           InputTransformer:
             InputTemplate: '{"AdditionalInformation":<additionalInformation>,"Region":<region>}'
             InputPathsMap:
               additionalInformation: '$.detail.additional-information'
               region: '$.region'
-        - Id: !Sub ${AWS::StackName}-build-to-sns-target
+        - Id: !Sub ${AWS::StackName}-sns-from-build-action
           Arn: !Ref BuildEventTopic
           InputTransformer:
             InputTemplate: '"The project <project> has <state> at <at>."'
@@ -68,7 +96,7 @@ Resources:
               state: '$.detail.build-status'
               at: '$.time'
 
-  PRReviewDocument:
+  ReviewPRDocument:
     Type: AWS::SSM::Document
     Properties:
       DocumentType: Automation
@@ -130,12 +158,12 @@ Resources:
                 sourceCommit: '{{SourceCommit}}'
                 destinationCommit: '{{DestinationCommit}}'
 
-  PRCommentReviewDocument:
+  CommentPRDocument:
     Type: AWS::SSM::Document
     Properties:
       DocumentType: Automation
       Content:
-        description: Add Comment of CodeBuild Result to PullRequest
+        description: Add Comment to PullRequest
         schemaVersion: '0.3'
         assumeRole: "{{ AutomationAssumeRole }}"
         parameters:
@@ -197,6 +225,76 @@ Resources:
             InputPayload:
               info: '{{AdditionalInformation}}'
               region: '{{Region}}'
+
+  ExecutePipelineDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      Content:
+        description: Execute Release Pipeline.
+        schemaVersion: '0.3'
+        assumeRole: "{{ AutomationAssumeRole }}"
+        parameters:
+          AutomationAssumeRole:
+            type: String
+            description: "(Optional) The ARN of the role that allows Automation to perform the actions on your behalf."
+          RepositoryName:
+            type: String
+            description: "(Required) Target repository name."
+          Version:
+            type: String
+            description: "(Required) Release version."
+        mainSteps:
+        - name: Execution
+          action: aws:executeScript
+          inputs:
+            Runtime: python3.7
+            Handler: script_handler
+            Script: |-
+              import boto3
+              def script_handler(event, context):
+                  repository_name = event['repository']
+                  branch_name = event['branch']
+
+                  try:
+                      client_codecommit = boto3.client('codecommit')
+                      client_codecommit.get_branch(
+                          repositoryName=repository_name,
+                          branchName=branch_name
+                      )
+                  except Exception:
+                      return
+
+                  pipeline_name = '%s-release-pipeline' % repository_name
+                  releaseVersion = event['releaseVersion']
+
+                  client_codepipeline = boto3.client('codepipeline')
+                  current_pipeline = client_codepipeline.get_pipeline(name=pipeline_name)
+
+                  stages = current_pipeline['pipeline']['stages']
+                  stage_order = 0
+                  for stage in stages:
+                      if stage.get("name") == "Source":
+                          break
+                      stage_order += 1
+
+                  actions = stage['actions']
+                  source_order = 0
+                  for action in actions:
+                      if action['configuration'].get('RepositoryName') == repository_name:
+                          break
+                      source_order += 1
+
+                  current_pipeline['pipeline']['stages'][stage_order]['actions'][source_order]['configuration']['BranchName'] = branch_name
+                  del current_pipeline['pipeline']['version']
+                  new_pipeline = current_pipeline['pipeline']
+
+                  client_codepipeline.update_pipeline(pipeline=new_pipeline)
+                  client_codepipeline.start_pipeline_execution(name=pipeline_name)
+            InputPayload:
+              repository: '{{RepositoryName}}'
+              branch: 'release/{{ReleaseVersion}}'
+              releaseVersion: '{{ReleaseVersion}}'
 
   BuildEventTopic:
     Type: AWS::SNS::Topic
